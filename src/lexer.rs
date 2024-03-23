@@ -42,6 +42,8 @@ impl<'a> Lexer<'a> {
 
     fn skip_comment(&mut self) {
         if self.cur_char == '#' {
+            // TODO: if the source doesn't end with a newline, then this loops indefinitely
+            // - could also check: `&& self.cur_char != EOF` to fix
             while self.cur_char != '\n' {
                 self.advance_pointer();
             }
