@@ -14,7 +14,7 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         // pretty insistently can't add a newline here
-        // let x: 'a String = format!("{}\n", source);
+        // let x = format!("{}\n", source);
         // let source_with_newline: &'a str = &(source.to_owned() + "\n");
 
         let mut l = Lexer {

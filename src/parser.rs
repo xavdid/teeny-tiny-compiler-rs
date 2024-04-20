@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
+use crate::emitter::Emitter;
 use crate::lexer::Lexer;
 use crate::tokens::{Token, IDENT};
 
-pub struct Parser<'a> {
+pub struct Parser<'a, 'b> {
     lexer: Lexer<'a>,
+    emitter: &'b mut Emitter,
     cur_token: Token,
     peek_token: Token,
 
@@ -13,12 +15,13 @@ pub struct Parser<'a> {
     labels_gotoed: HashSet<String>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(mut lexer: Lexer<'a>) -> Self {
+impl<'a, 'b> Parser<'a, 'b> {
+    pub fn new(mut lexer: Lexer<'a>, emitter: &'b mut Emitter) -> Self {
         let (cur_token, peek_token) = (lexer.get_next_token(), lexer.get_next_token());
 
         Parser {
             lexer,
+            emitter,
             cur_token,
             peek_token,
             symbols: HashSet::new(),
@@ -31,7 +34,6 @@ impl<'a> Parser<'a> {
     // it gives the error I want, which is good, but the whole thing isn't great otherwise
     // my guess is I need to do the whole thing with a macro?
     fn assert_and_advance_token(&mut self, valid: bool, expected: Token) {
-        println!("    ASSERTING {:?} ({valid})", expected);
         if !valid {
             panic!(
                 "ERR (parser): Expected {:?}, got {:?}",
@@ -46,15 +48,9 @@ impl<'a> Parser<'a> {
         self.peek_token = self.lexer.get_next_token();
     }
 
-    // fn cur_token_is(&self, token: &Token) -> bool {
-    //     matches!(&self.cur_token, token)
-    // }
-    // fn peek_token_is(&self, token: &Token) -> bool {
-    //     matches!(&self.peek_token, token)
-    // }
-
     pub fn program(&mut self) {
-        println!("  PROGRAM");
+        self.emitter.header_line("#include <stdio.h>");
+        self.emitter.header_line("int main(void){");
 
         while matches!(self.cur_token, Token::Newline) {
             self.advance_token();
@@ -63,6 +59,9 @@ impl<'a> Parser<'a> {
         while !matches!(self.cur_token, Token::Eof) {
             self.statement();
         }
+
+        self.emitter.emit_line("return 0;");
+        self.emitter.emit_line("}");
 
         for label in &self.labels_gotoed {
             if !self.labels_declared.contains(label) {
@@ -73,35 +72,39 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) {
         if matches!(self.cur_token, Token::Print) {
-            println!("  STATEMENT-PRINT");
             self.advance_token();
 
-            if matches!(self.cur_token, Token::String(_)) {
+            if let Token::String(text) = &self.cur_token {
+                self.emitter.emit_line(&format!("printf(\"{text}\\n\");"));
                 self.advance_token();
             } else {
+                self.emitter.emit("printf(\"%.2f\\n\", (float)(");
                 self.expression();
+                self.emitter.emit_line("));")
             }
         } else if matches!(self.cur_token, Token::If) {
-            println!("  STATEMENT-IF");
-
             self.advance_token();
+            self.emitter.emit("if(");
             self.comparison();
 
             self.assert_and_advance_token(matches!(self.cur_token, Token::Then), Token::Then);
             self.nl();
+            self.emitter.emit_line("){");
 
             while !matches!(self.cur_token, Token::Endif) {
                 self.statement();
             }
 
             self.assert_and_advance_token(matches!(self.cur_token, Token::Endif), Token::Endif);
+            self.emitter.emit_line("}");
         } else if matches!(self.cur_token, Token::While) {
-            println!("  STATEMENT-WHILE");
             self.advance_token();
+            self.emitter.emit("while(");
             self.comparison();
 
             self.assert_and_advance_token(matches!(self.cur_token, Token::Repeat), Token::Repeat);
             self.nl();
+            self.emitter.emit_line("){");
 
             while !matches!(self.cur_token, Token::Endwhile) {
                 self.statement();
@@ -111,8 +114,8 @@ impl<'a> Parser<'a> {
                 matches!(self.cur_token, Token::Endwhile),
                 Token::Endwhile,
             );
+            self.emitter.emit_line("}");
         } else if matches!(self.cur_token, Token::Label) {
-            println!("  STATEMENT-LABEL");
             self.advance_token();
 
             // should basically always match at this point
@@ -124,13 +127,12 @@ impl<'a> Parser<'a> {
             };
             if self.labels_declared.contains(label_text) {
                 panic!("Label already exists: {label_text}");
-            } else {
-                self.labels_declared.insert(label_text.to_string());
             }
 
+            self.labels_declared.insert(label_text.to_string());
+            self.emitter.emit(&format!("{label_text}:"));
             self.assert_and_advance_token(matches!(self.cur_token, Token::Ident(_)), IDENT);
         } else if matches!(self.cur_token, Token::Goto) {
-            println!("  STATEMENT-GOTO");
             self.advance_token();
 
             // should basically always match at this point
@@ -142,10 +144,9 @@ impl<'a> Parser<'a> {
             };
 
             self.labels_gotoed.insert(label_text.to_string());
-
+            self.emitter.emit(&format!("goto {label_text};"));
             self.assert_and_advance_token(matches!(self.cur_token, Token::Ident(_)), IDENT);
         } else if matches!(self.cur_token, Token::Let) {
-            println!("  STATEMENT-LET");
             self.advance_token();
 
             let Token::Ident(ident_name) = &self.cur_token else {
@@ -154,13 +155,16 @@ impl<'a> Parser<'a> {
                     self.cur_token
                 )
             };
-            self.symbols.insert(ident_name.clone());
+            if self.symbols.insert(ident_name.clone()) {
+                self.emitter.header_line(&format!("float {ident_name};"));
+            }
 
+            self.emitter.emit(&format!("{ident_name} = "));
             self.assert_and_advance_token(matches!(self.cur_token, Token::Ident(_)), IDENT);
             self.assert_and_advance_token(matches!(self.cur_token, Token::Eq), Token::Eq);
             self.expression();
+            self.emitter.emit_line(";");
         } else if matches!(self.cur_token, Token::Input) {
-            println!("  STATEMENT-INPUT");
             self.advance_token();
 
             let Token::Ident(ident_name) = &self.cur_token else {
@@ -169,7 +173,16 @@ impl<'a> Parser<'a> {
                     self.cur_token
                 )
             };
-            self.symbols.insert(ident_name.clone());
+
+            if self.symbols.insert(ident_name.clone()) {
+                self.emitter.header_line(&format!("float {ident_name};"))
+            }
+
+            self.emitter
+                .emit_line(&format!("if(0 == scanf(\"%f\", &{ident_name})) {{"));
+            self.emitter.emit_line(&format!("{ident_name} = 0;"));
+            self.emitter.emit_line("scanf(\"%*s\");");
+            self.emitter.emit_line("}");
 
             self.assert_and_advance_token(matches!(self.cur_token, Token::Ident(_)), IDENT);
         } else {
@@ -180,11 +193,10 @@ impl<'a> Parser<'a> {
     }
 
     fn comparison(&mut self) {
-        println!("  COMPARISON");
-
         self.expression();
         // must be at least one comparison operator and another expression
         if self.is_comparison_operator() {
+            self.emitter.emit(self.cur_token.as_str());
             self.advance_token();
             self.expression();
         } else {
@@ -192,6 +204,7 @@ impl<'a> Parser<'a> {
         }
 
         while self.is_comparison_operator() {
+            self.emitter.emit(self.cur_token.as_str());
             self.advance_token();
             self.expression();
         }
@@ -205,46 +218,44 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) {
-        println!("  EXPRESSION");
         self.term();
 
         while matches!(self.cur_token, Token::Plus | Token::Minus) {
+            self.emitter.emit(self.cur_token.as_str());
             self.advance_token();
             self.term();
         }
     }
 
     fn term(&mut self) {
-        println!("  TERM");
-
         self.unary();
 
         while matches!(self.cur_token, Token::Asterisk | Token::Slash) {
+            self.emitter.emit(self.cur_token.as_str());
             self.advance_token();
             self.unary();
         }
     }
 
     fn unary(&mut self) {
-        println!("  UNARY");
-
         if matches!(self.cur_token, Token::Plus | Token::Minus) {
+            self.emitter.emit(self.cur_token.as_str());
             self.advance_token();
         }
         self.primary();
     }
 
     fn primary(&mut self) {
-        println!("  PRIMARY ({:?})", self.cur_token);
-
         match &self.cur_token {
-            Token::Number(_) => {
+            Token::Number(num) => {
+                self.emitter.emit(num);
                 self.advance_token();
             }
             Token::Ident(ident) => {
                 if !self.symbols.contains(ident) {
                     panic!("Referencing varible before assignment: {ident}");
                 }
+                self.emitter.emit(ident);
                 self.advance_token();
             }
             _ => {
@@ -254,7 +265,6 @@ impl<'a> Parser<'a> {
     }
 
     fn nl(&mut self) {
-        println!("  NEWLINE");
         self.assert_and_advance_token(matches!(self.cur_token, Token::Newline), Token::Newline);
 
         while matches!(self.cur_token, Token::Newline) {

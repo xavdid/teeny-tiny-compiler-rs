@@ -30,11 +30,11 @@ pub enum Token {
 }
 
 /// singleton to prevent re-initializing strings for matching
-pub const STR: Token = Token::String(String::new());
+// pub const STR: Token = Token::String(String::new());
 /// singleton to prevent re-initializing strings for matching
 pub const IDENT: Token = Token::Ident(String::new());
 /// singleton to prevent re-initializing strings for matching
-pub const NUM: Token = Token::Number(String::new());
+// pub const NUM: Token = Token::Number(String::new());
 
 impl Token {
     pub fn is_keyword(k: &str) -> Option<Token> {
@@ -53,37 +53,19 @@ impl Token {
             _ => None,
         }
     }
-    fn value(&self) -> i32 {
+    pub fn as_str(&self) -> &str {
         match self {
-            Self::Eof => -1,
-            Self::Newline => 0,
-            Self::Number(_) => 1,
-            Self::Ident(_) => 2,
-            Self::String(_) => 3,
-            //  Keywords
-            Self::Label => 101,
-            Self::Goto => 102,
-            Self::Print => 103,
-            Self::Input => 104,
-            Self::Let => 105,
-            Self::If => 106,
-            Self::Then => 107,
-            Self::Endif => 108,
-            Self::While => 109,
-            Self::Repeat => 110,
-            Self::Endwhile => 111,
-            // Operators
-            Self::Eq => 201,
-            Self::Plus => 202,
-            Self::Minus => 203,
-            Self::Asterisk => 204,
-            Self::Slash => 205,
-            Self::Eqeq => 206,
-            Self::Noteq => 207,
-            Self::Lt => 208,
-            Self::Lteq => 209,
-            Self::Gt => 210,
-            Self::Gteq => 211,
+            Self::Gt => ">",
+            Self::Lt => "<",
+            Self::Eq => "=",
+            Self::Eqeq => "==",
+            Self::Gteq => ">=",
+            Self::Lteq => "<=",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Asterisk => "*",
+            Self::Slash => "/",
+            _ => panic!("NO STRING REPRESENTATION FOR {:?}", self),
         }
     }
 }
